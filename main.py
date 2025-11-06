@@ -7,8 +7,6 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict
 from contextlib import contextmanager
 from collections import Counter
-warnings.filterwarnings("ignore", category=DeprecationWarning)
-
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -163,7 +161,7 @@ def init_database():
                 current_streak INTEGER DEFAULT 0,
                 last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 reminder_enabled BOOLEAN DEFAULT 1,
-                last_reminder_date DATE
+                last_reminder_date TEXT
             )
         ''')
         
@@ -188,7 +186,7 @@ def init_database():
             CREATE TABLE IF NOT EXISTS activity_calendar (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER,
-                activity_date DATE,
+                activity_date TEXT,
                 questions_count INTEGER DEFAULT 0,
                 UNIQUE(user_id, activity_date),
                 FOREIGN KEY (user_id) REFERENCES users(user_id)
@@ -284,7 +282,7 @@ def save_answer_history(user_id: int, question: str, question_type: str,
 
 def update_activity_calendar(user_id: int):
     """Оновити календар активності"""
-    today = datetime.now().date()
+    today = str(datetime.now().date())  # ← Перетворюємо на рядок
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute('''
@@ -294,6 +292,7 @@ def update_activity_calendar(user_id: int):
             DO UPDATE SET questions_count = questions_count + 1
         ''', (user_id, today))
         conn.commit()
+
 
 
 def track_weak_spot(user_id: int, num1: int, num2: int):
