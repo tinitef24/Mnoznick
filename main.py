@@ -16,20 +16,28 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import random
 
-BOT_TOKEN = "YOUR-BOT-TOKEN"
-ADMIN_ID = 11111111 #Введіть telegram id адміна. Дізнатись - @userinfobot
+BOT_TOKEN = "<YOUR_BOT_TOKEN_HERE>"  # Вкажіть токен бота
+ADMIN_ID = <YOUR_ADMIN_ID_HERE>  # Вкажіть свій ID адміністратора
+
+WHITELIST = []  
+
+PAYMENT_CONTACT = "@an200885"  
+
+MONTHLY_PRICE = 800  # грн/місяць
+FULL_CODE_PRICE = 150  # $ одноразово
+
 DB_NAME = "quiz_bot.db"
 
 ANSWER_TIME_LIMITS = {
     1: 15,  
     2: 20,  
-    3: 30, 
-    'lightning': 5, 
+    3: 30,  
+    'lightning': 5,  
     'sniper': 999,   
     'training': 999  
 }
 
-REMINDER_HOURS = [11, 13, 15, 17, 19, 21, 23]
+REMINDER_HOURS = [9, 11, 13, 15, 17, 19, 21]
 
 REMINDER_MESSAGES = [
     {
@@ -85,6 +93,7 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
 class QuizStates(StatesGroup):
     choosing_mode = State()
     choosing_level = State()
@@ -95,7 +104,7 @@ class QuizStates(StatesGroup):
 
 @contextmanager
 def get_db():
-    """Контекстний менеджер для роботи з БД"""
+    
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     try:
@@ -103,117 +112,50 @@ def get_db():
     finally:
         conn.close()
 
-
 def migrate_database():
-    """Міграція бази даних для додавання нових колонок"""
+    
     with get_db() as conn:
         cursor = conn.cursor()
-        
+
         try:
+
             cursor.execute("PRAGMA table_info(answer_history)")
             columns = [row[1] for row in cursor.fetchall()]
-            
+
             if 'question_type' not in columns:
                 logger.info("Додаємо колонку question_type...")
                 cursor.execute('ALTER TABLE answer_history ADD COLUMN question_type TEXT DEFAULT "standard"')
-            
+
             if 'mode' not in columns:
                 logger.info("Додаємо колонку mode...")
                 cursor.execute('ALTER TABLE answer_history ADD COLUMN mode TEXT DEFAULT "normal"')
-            
+
             cursor.execute("PRAGMA table_info(users)")
             user_columns = [row[1] for row in cursor.fetchall()]
-            
+
             if 'custom_name' not in user_columns:
                 logger.info("Додаємо колонку custom_name...")
                 cursor.execute('ALTER TABLE users ADD COLUMN custom_name TEXT')
-            
+
             if 'reminder_enabled' not in user_columns:
                 logger.info("Додаємо колонку reminder_enabled...")
                 cursor.execute('ALTER TABLE users ADD COLUMN reminder_enabled BOOLEAN DEFAULT 1')
-            
+
             if 'last_reminder_date' not in user_columns:
                 logger.info("Додаємо колонку last_reminder_date...")
                 cursor.execute('ALTER TABLE users ADD COLUMN last_reminder_date DATE')
-            
+
+            if 'is_whitelisted' not in user_columns:
+                logger.info("Додаємо колонку is_whitelisted...")
+                cursor.execute('ALTER TABLE users ADD COLUMN is_whitelisted BOOLEAN DEFAULT 0')
+
             conn.commit()
             logger.info("✅ Міграція завершена")
         except Exception as e:
             logger.error(f"Помилка міграції: {e}")
 
-
-def init_database():
-    """Ініціалізація бази даних"""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT,
-                first_name TEXT,
-                custom_name TEXT,
-                start_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                total_questions INTEGER DEFAULT 0,
-                correct_answers INTEGER DEFAULT 0,
-                wrong_answers INTEGER DEFAULT 0,
-                best_streak INTEGER DEFAULT 0,
-                current_streak INTEGER DEFAULT 0,
-                last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                reminder_enabled BOOLEAN DEFAULT 1,
-                last_reminder_date TEXT
-            )
-        ''')
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS answer_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                question TEXT,
-                question_type TEXT DEFAULT 'standard',
-                user_answer INTEGER,
-                correct_answer INTEGER,
-                is_correct BOOLEAN,
-                response_time REAL,
-                level INTEGER,
-                mode TEXT DEFAULT 'normal',
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users(user_id)
-            )
-        ''')
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS activity_calendar (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                activity_date TEXT,
-                questions_count INTEGER DEFAULT 0,
-                UNIQUE(user_id, activity_date),
-                FOREIGN KEY (user_id) REFERENCES users(user_id)
-            )
-        ''')
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS weak_spots (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                number1 INTEGER,
-                number2 INTEGER,
-                error_count INTEGER DEFAULT 0,
-                last_error TIMESTAMP,
-                UNIQUE(user_id, number1, number2),
-                FOREIGN KEY (user_id) REFERENCES users(user_id)
-            )
-        ''')
-        
-        conn.commit()
-        logger.info("База даних ініціалізована")
-    
-    migrate_database()
-
-
 def get_or_create_user(user_id: int, username: str, first_name: str) -> dict:
-    """Отримати або створити користувача"""
+    
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
@@ -230,9 +172,8 @@ def get_or_create_user(user_id: int, username: str, first_name: str) -> dict:
         
         return dict(user) if user else {}
 
-
 def update_user_stats(user_id: int, is_correct: bool):
-    """Оновити статистику користувача"""
+    
     with get_db() as conn:
         cursor = conn.cursor()
         
@@ -263,11 +204,10 @@ def update_user_stats(user_id: int, is_correct: bool):
         
         conn.commit()
 
-
 def save_answer_history(user_id: int, question: str, question_type: str,
                        user_answer: int, correct_answer: int, is_correct: bool, 
                        response_time: float, level: int, mode: str = "normal"):
-    """Зберегти історію відповіді"""
+    
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute('''
@@ -279,10 +219,9 @@ def save_answer_history(user_id: int, question: str, question_type: str,
               is_correct, response_time, level, mode))
         conn.commit()
 
-
 def update_activity_calendar(user_id: int):
-    """Оновити календар активності"""
-    today = str(datetime.now().date())  # ← Перетворюємо на рядок
+    
+    today = str(datetime.now().date())   
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute('''
@@ -293,10 +232,8 @@ def update_activity_calendar(user_id: int):
         ''', (user_id, today))
         conn.commit()
 
-
-
 def track_weak_spot(user_id: int, num1: int, num2: int):
-    """Відстежити слабке місце"""
+    
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute('''
@@ -307,9 +244,8 @@ def track_weak_spot(user_id: int, num1: int, num2: int):
         ''', (user_id, num1, num2))
         conn.commit()
 
-
 def get_weak_spots(user_id: int, limit: int = 5) -> List[Dict]:
-    """Отримати топ слабких місць"""
+    
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute('''
@@ -321,9 +257,8 @@ def get_weak_spots(user_id: int, limit: int = 5) -> List[Dict]:
         ''', (user_id, limit))
         return [dict(row) for row in cursor.fetchall()]
 
-
 def get_activity_calendar(user_id: int, days: int = 30) -> Dict[str, int]:
-    """Отримати календар активності"""
+    
     with get_db() as conn:
         cursor = conn.cursor()
         start_date = (datetime.now() - timedelta(days=days)).date()
@@ -336,35 +271,49 @@ def get_activity_calendar(user_id: int, days: int = 30) -> Dict[str, int]:
         return {str(row['activity_date']): row['questions_count'] 
                 for row in cursor.fetchall()}
 
-
 def get_user_stats(user_id: int) -> dict:
-    """Отримати статистику користувача"""
+    
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
         user = cursor.fetchone()
         return dict(user) if user else {}
 
-
 def set_custom_name(user_id: int, custom_name: str):
-    """Встановити кастомне ім'я користувачу"""
+    
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute('UPDATE users SET custom_name = ? WHERE user_id = ?', (custom_name, user_id))
         conn.commit()
 
-
 def get_display_name(user_id: int) -> str:
-    """Отримати ім'я для відображення"""
+    
     stats = get_user_stats(user_id)
     return stats.get('custom_name') or stats.get('first_name') or 'User'
 
+def is_user_whitelisted(user_id: int) -> bool:
+    
+    return user_id in WHITELIST or user_id == ADMIN_ID
+
+def get_payment_message(user_id: int) -> str:
+    
+    return f
+
+def load_whitelist_from_db():
+    
+    global WHITELIST
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id FROM users WHERE is_whitelisted = 1")
+        WHITELIST = [row[0] for row in cursor.fetchall()]
+    logger.info(f"📋 Завантажено {len(WHITELIST)} користувачів з вайтліста")
+
 class AIAssistant:
-    """AI-помічник для аналізу та порад"""
+    
     
     @staticmethod
     def analyze_mistakes(user_id: int) -> str:
-        """Аналіз помилок користувача"""
+        
         weak_spots = get_weak_spots(user_id, 5)
         
         if not weak_spots:
@@ -378,6 +327,7 @@ class AIAssistant:
             errors = spot['error_count']
             analysis += f"{i}. {num1} × {num2} — помилок: {errors}\n"
         
+
         analysis += "\n💡 Мої спостереження:\n"
         
         all_numbers = []
@@ -399,7 +349,7 @@ class AIAssistant:
     
     @staticmethod
     def get_motivational_message(accuracy: float, streak: int) -> str:
-        """Мотиваційне повідомлення"""
+        
         if accuracy >= 90:
             messages = [
                 "🌟 Феноменально! Ти справжній майстер!",
@@ -436,7 +386,7 @@ class AIAssistant:
     
     @staticmethod
     def get_hint(num1: int, num2: int) -> str:
-        """Підказка для прикладу"""
+        
         hints = [
             f"💡 Підказка: {num1} × {num2} = {num1} + {num1} + ... ({num2} разів)",
             f"💡 Підказка: {num1} × {num2-1} = {num1 * (num2-1)}, тому {num1} × {num2} = {num1 * (num2-1)} + {num1}",
@@ -445,7 +395,7 @@ class AIAssistant:
         return random.choice(hints)
 
 def generate_question(level: int, specific_number: Optional[int] = None) -> tuple:
-    """Генерує питання залежно від рівня"""
+    
     
     if level == 1:
         if specific_number:
@@ -464,18 +414,16 @@ def generate_question(level: int, specific_number: Optional[int] = None) -> tupl
     correct = num1 * num2
     return num1, num2, correct
 
-
 def get_multiplication_table(number: int) -> str:
-    """Генерує таблицю множення для числа"""
+    
     table = f"📋 ТАБЛИЦЯ МНОЖЕННЯ НА {number}\n\n"
     for i in range(1, 11):
         result = number * i
         table += f"{number} × {i:2d} = {result:3d}\n"
     return table
 
-
 def explain_mistake(user_num1: int, user_num2: int, user_answer: int, correct_answer: int) -> str:
-    """Створює детальне пояснення помилки"""
+    
     explanation = f"❌ Неправильно!\n\n"
     explanation += f"📝 Правильна відповідь: {user_num1} × {user_num2} = {correct_answer}\n\n"
     
@@ -497,7 +445,7 @@ def explain_mistake(user_num1: int, user_num2: int, user_answer: int, correct_an
     return explanation
 
 def create_main_menu() -> InlineKeyboardBuilder:
-    """Створює головне меню бота"""
+    
     builder = InlineKeyboardBuilder()
     builder.button(text="🎯 Почати квіз", callback_data="start_quiz")
     builder.button(text="⚡ Режим Блискавка", callback_data="lightning_mode")
@@ -512,9 +460,8 @@ def create_main_menu() -> InlineKeyboardBuilder:
     builder.adjust(2, 2, 1, 1, 1, 1, 1, 1)
     return builder
 
-
 def create_mode_menu() -> InlineKeyboardBuilder:
-    """Створює меню вибору режиму"""
+    
     builder = InlineKeyboardBuilder()
     builder.button(text="🎲 Випадкові приклади", callback_data="mode_random")
     builder.button(text="🔢 Конкретне число", callback_data="mode_specific")
@@ -523,9 +470,8 @@ def create_mode_menu() -> InlineKeyboardBuilder:
     builder.adjust(1)
     return builder
 
-
 def create_level_menu() -> InlineKeyboardBuilder:
-    """Створює меню вибору рівня"""
+    
     builder = InlineKeyboardBuilder()
     builder.button(text="⭐ Рівень 1: 2-9 × 2-9", callback_data="level_1")
     builder.button(text="⭐⭐ Рівень 2: 10-99 × 2-9", callback_data="level_2")
@@ -534,9 +480,8 @@ def create_level_menu() -> InlineKeyboardBuilder:
     builder.adjust(1)
     return builder
 
-
 def create_number_menu() -> InlineKeyboardBuilder:
-    """Створює меню вибору конкретного числа"""
+    
     builder = InlineKeyboardBuilder()
     for i in range(2, 10):
         builder.button(text=f"{i}", callback_data=f"number_{i}")
@@ -544,9 +489,8 @@ def create_number_menu() -> InlineKeyboardBuilder:
     builder.adjust(4)
     return builder
 
-
 def create_table_selection_menu() -> InlineKeyboardBuilder:
-    """Створює меню вибору числа для перегляду таблиці"""
+    
     builder = InlineKeyboardBuilder()
     for i in range(2, 10):
         builder.button(text=f"Таблиця на {i}", callback_data=f"table_{i}")
@@ -554,9 +498,8 @@ def create_table_selection_menu() -> InlineKeyboardBuilder:
     builder.adjust(2)
     return builder
 
-
 def create_after_wrong_answer_menu(num1: int, num2: int) -> InlineKeyboardBuilder:
-    """Меню після неправильної відповіді"""
+    
     builder = InlineKeyboardBuilder()
     table_num = num1 if num1 <= 9 else num2 if num2 <= 9 else num1
     builder.button(text=f"📋 Таблиця на {table_num}", callback_data=f"show_table_{table_num}")
@@ -574,9 +517,8 @@ router = Router()
 active_timers = {}
 
 async def send_daily_reminders():
-    """Надсилає нагадування у визначені години"""
-    last_reminder_hour = -1
     
+    last_reminder_hour = -1 
     while True:
         try:
             now = datetime.now()
@@ -584,67 +526,69 @@ async def send_daily_reminders():
 
             if current_hour in REMINDER_HOURS and current_hour != last_reminder_hour:
                 logger.info(f"⏰ Надсилаємо нагадування о {current_hour}:00")
-                
+
                 with get_db() as conn:
                     cursor = conn.cursor()
                     today = now.date()
-                    
+
                     cursor.execute('''
                         SELECT user_id, first_name, custom_name, last_activity
                         FROM users
                         WHERE reminder_enabled = 1
                     ''')
-                    
+
                     users = cursor.fetchall()
                     sent_count = 0
-                    
+
                     for user in users:
                         user_id = user['user_id']
+
+                        if not is_user_whitelisted(user_id):
+                            continue
+
                         display_name = user['custom_name'] or user['first_name']
-                        
+
                         try:
                             last_activity = datetime.fromisoformat(user['last_activity'])
                             hours_inactive = (now - last_activity).total_seconds() / 3600
-                            
+
                             if hours_inactive < 3:
                                 continue
                         except:
                             pass
-                        
+
                         msg_template = random.choice(REMINDER_MESSAGES)
-                        
                         stats = get_user_stats(user_id)
                         total = stats.get('total_questions', 0)
                         streak = stats.get('current_streak', 0)
-                        
+
                         reminder_text = f"{msg_template['emoji']} {msg_template['greeting']}, {display_name}!\n\n"
                         reminder_text += msg_template['text']
-                        
+
                         if total > 0:
                             accuracy = (stats['correct_answers'] / total * 100) if total > 0 else 0
                             reminder_text += f"\n\n📊 Твоя точність: {accuracy:.0f}%"
-                        
+
                         if streak > 0:
                             reminder_text += f"\n🔥 Поточна серія: {streak} підряд!"
-                        
+
                         reminder_text += f"\n\n🎯 {msg_template['cta']}"
-                        
+
                         builder = InlineKeyboardBuilder()
-                        
                         start_buttons = [
                             ("🎯 Почати квіз", "start_quiz"),
                             ("⚡ Блискавка", "lightning_mode"),
                             ("🎓 Навчання", "training_mode"),
                             ("🎯 Слабкі місця", "mode_weak_spots")
                         ]
-                        
+
                         main_button = random.choice(start_buttons)
                         builder.button(text=main_button[0], callback_data=main_button[1])
                         builder.button(text="📊 Моя статистика", callback_data="my_stats")
                         builder.button(text="⏰ Відкласти на годину", callback_data="snooze_reminder")
                         builder.button(text="🔕 Вимкнути нагадування", callback_data="disable_reminders")
                         builder.adjust(1, 1, 1, 1)
-                        
+
                         try:
                             await bot.send_message(
                                 user_id,
@@ -652,32 +596,40 @@ async def send_daily_reminders():
                                 reply_markup=builder.as_markup()
                             )
                             sent_count += 1
-                            
                             await asyncio.sleep(0.1)
-                            
                         except Exception as e:
                             logger.error(f"Помилка нагадування для {user_id}: {e}")
-                    
-                    logger.info(f"✅ Надіслано {sent_count} нагадувань о {current_hour}:00")
-                
+
+                logger.info(f"✅ Надіслано {sent_count} нагадувань о {current_hour}:00")
+
                 last_reminder_hour = current_hour
-                
                 await asyncio.sleep(60)
-            
+
             else:
                 await asyncio.sleep(60)
-                
+
                 if current_hour != last_reminder_hour and current_hour not in REMINDER_HOURS:
                     last_reminder_hour = -1
-        
+
         except Exception as e:
             logger.error(f"Помилка в циклі нагадувань: {e}")
             await asyncio.sleep(60)
 
 @router.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
-    """Обробник команди /start"""
+    
     user_id = message.from_user.id
+    
+
+    if not is_user_whitelisted(user_id):
+        payment_msg = get_payment_message(user_id)
+        builder = InlineKeyboardBuilder()
+        builder.button(text="📞 Зв'язатися", url=f"https://t.me/{PAYMENT_CONTACT.replace('@', '')}")
+        builder.button(text="🔄 Перевірити доступ", callback_data="check_access")
+        builder.adjust(1)
+        await message.answer(payment_msg, reply_markup=builder.as_markup(), parse_mode="Markdown")
+        return
+    
     username = message.from_user.username or "Unknown"
     first_name = message.from_user.first_name or "User"
     
@@ -693,34 +645,14 @@ async def cmd_start(message: Message, state: FSMContext):
     
     await state.clear()
     
-    welcome_text = f"""
-🎓 Привіт, {display_name}!
-
-Вітаю в боті для вивчення таблиці множення! 📚
-
-🎯 Що я вмію:
-
-📝 Квізи з різними рівнями складності
-⚡ Швидкісний режим (5 секунд)
-🎯 Снайперський режим (без таймера)
-🎓 Навчальний режим (з підказками)
-📋 Перегляд таблиць множення
-📊 Відстеження твоєї статистики
-📅 Календар активності
-🤖 AI-аналіз твоїх слабких місць
-🏆 Глобальний рейтинг
-🔔 Щоденні нагадування
-
-Обирай що тобі подобається! 👇
-"""
+    welcome_text = f
     
     builder = create_main_menu()
     await message.answer(welcome_text, reply_markup=builder.as_markup())
 
-
 @router.message(Command("stats"))
 async def cmd_stats(message: Message):
-    """Статистика користувача"""
+    
     user_id = message.from_user.id
     stats = get_user_stats(user_id)
     
@@ -733,29 +665,154 @@ async def cmd_stats(message: Message):
     correct = stats['correct_answers']
     accuracy = (correct / total * 100) if total > 0 else 0
     
-    stats_text = f"""
-📊 СТАТИСТИКА: {display_name}
-
-📅 {stats['start_date'][:10]}
-🕐 {stats['last_activity'][:16]}
-
-📈 Показники:
-• Питань: {total}
-• Правильних: {correct} ✅
-• Точність: {accuracy:.1f}%
-
-🔥 Рекорди:
-• Найкраща серія: {stats['best_streak']}
-• Поточна серія: {stats['current_streak']}
-
-{AIAssistant.get_motivational_message(accuracy, stats['current_streak'])}
-"""
+    stats_text = f
     await message.answer(stats_text)
 
+@router.callback_query(F.data == "check_access")
+async def check_access_callback(callback: CallbackQuery):
+    
+    user_id = callback.from_user.id
+    
+    if is_user_whitelisted(user_id):
+        await callback.answer("✅ Доступ підтверджено!", show_alert=True)
+        await callback.message.delete()
+
+        from aiogram.types import Message as Msg
+        temp_msg = Msg(
+            message_id=callback.message.message_id,
+            date=callback.message.date,
+            chat=callback.message.chat,
+            from_user=callback.from_user
+        )
+
+        display_name = get_display_name(user_id)
+        welcome_text = f
+        builder = create_main_menu()
+        await callback.message.answer(welcome_text, reply_markup=builder.as_markup())
+    else:
+        await callback.answer("❌ Доступ не надано. Звертайся до адміна.", show_alert=True)
+
+@router.message(Command("addwhite"))
+async def cmd_add_to_whitelist(message: Message):
+    
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ Тільки для адміна!")
+        return
+    
+    try:
+        parts = message.text.strip().split()
+        if len(parts) != 2:
+            await message.answer("❌ Формат: /addwhite USER_ID")
+            return
+        
+        user_id = int(parts[1])
+        
+        if user_id in WHITELIST:
+            await message.answer(f"ℹ️ Користувач {user_id} вже у вайтлісті!")
+            return
+        
+        WHITELIST.append(user_id)
+        
+
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET is_whitelisted = 1 WHERE user_id = ?", (user_id,))
+            conn.commit()
+        
+        await message.answer(f"✅ Користувача {user_id} додано до вайтліста!")
+        
+
+        try:
+            await bot.send_message(
+                user_id,
+                "🎉 **ДОСТУП НАДАНО!**\n\n"
+                "Вітаємо! Тепер у тебе є повний доступ до бота! 🚀\n\n"
+                "Використовуй /start щоб почати!",
+                parse_mode="Markdown"
+            )
+        except:
+            pass
+            
+    except ValueError:
+        await message.answer("❌ USER_ID має бути числом!")
+    except Exception as e:
+        await message.answer(f"❌ Помилка: {e}")
+
+@router.message(Command("removewhite"))
+async def cmd_remove_from_whitelist(message: Message):
+    
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ Тільки для адміна!")
+        return
+    
+    try:
+        parts = message.text.strip().split()
+        if len(parts) != 2:
+            await message.answer("❌ Формат: /removewhite USER_ID")
+            return
+        
+        user_id = int(parts[1])
+        
+        if user_id not in WHITELIST:
+            await message.answer(f"ℹ️ Користувач {user_id} не у вайтлісті!")
+            return
+        
+        WHITELIST.remove(user_id)
+        
+
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET is_whitelisted = 0 WHERE user_id = ?", (user_id,))
+            conn.commit()
+        
+        await message.answer(f"✅ Користувача {user_id} видалено з вайтліста!")
+        
+
+        try:
+            await bot.send_message(
+                user_id,
+                f"🔒 **ДОСТУП СКАСОВАНО**\n\n"
+                f"Термін підписки закінчився.\n\n"
+                f"Для відновлення доступу звертайся: {PAYMENT_CONTACT}",
+                parse_mode="Markdown"
+            )
+        except:
+            pass
+            
+    except ValueError:
+        await message.answer("❌ USER_ID має бути числом!")
+    except Exception as e:
+        await message.answer(f"❌ Помилка: {e}")
+
+@router.message(Command("whitelist"))
+async def cmd_show_whitelist(message: Message):
+    
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ Тільки для адміна!")
+        return
+    
+    if not WHITELIST:
+        await message.answer("📋 Вайтліст порожній!")
+        return
+    
+    whitelist_text = "📋 **ВАЙТЛІСТ КОРИСТУВАЧІВ:**\n\n"
+    
+    for idx, user_id in enumerate(WHITELIST, 1):
+
+        stats = get_user_stats(user_id)
+        if stats:
+            name = stats.get("custom_name") or stats.get("first_name", "Unknown")
+            whitelist_text += f"{idx}. {name} (ID: `{user_id}`)\n"
+        else:
+            whitelist_text += f"{idx}. ID: `{user_id}` (не реєстрований)\n"
+    
+    whitelist_text += f"\n**Всього: {len(WHITELIST)} користувачів**"
+    
+    await message.answer(whitelist_text, parse_mode="Markdown")
 
 @router.message(Command("setname"))
 async def cmd_admin_setname(message: Message, state: FSMContext):
-    """Команда адміна - встановити ім'я"""
+    
     if message.from_user.id != ADMIN_ID:
         await message.answer("❌ Тільки для адміна!")
         return
@@ -763,10 +820,9 @@ async def cmd_admin_setname(message: Message, state: FSMContext):
     await message.answer("👤 Надішли: ID ім'я\n\nПриклад: 12345 Максим")
     await state.set_state(QuizStates.admin_set_name)
 
-
 @router.message(StateFilter(QuizStates.admin_set_name))
 async def process_admin_setname(message: Message, state: FSMContext):
-    """Обробка встановлення імені"""
+    
     try:
         parts = message.text.strip().split(maxsplit=1)
         if len(parts) != 2:
@@ -795,17 +851,16 @@ async def process_admin_setname(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "start_quiz")
 async def start_quiz_callback(callback: CallbackQuery, state: FSMContext):
-    """Початок квізу"""
+    
     await callback.answer()
     text = "🎮 ВИБЕРИ РЕЖИМ ГРИ"
     builder = create_mode_menu()
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
     await state.set_state(QuizStates.choosing_mode)
 
-
 @router.callback_query(F.data == "lightning_mode")
 async def lightning_mode_callback(callback: CallbackQuery, state: FSMContext):
-    """Блискавичний режим"""
+    
     await callback.answer()
     await state.update_data(mode="lightning", level=1, question_type="standard")
     text = "⚡ РЕЖИМ БЛИСКАВКА\n\n5 секунд на питання!\nГотовий?"
@@ -815,10 +870,9 @@ async def lightning_mode_callback(callback: CallbackQuery, state: FSMContext):
     builder.adjust(1)
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
 
-
 @router.callback_query(F.data == "sniper_mode")
 async def sniper_mode_callback(callback: CallbackQuery, state: FSMContext):
-    """Снайперський режим"""
+    
     await callback.answer()
     await state.update_data(mode="sniper", level=1, question_type="standard")
     text = "🎯 РЕЖИМ СНАЙПЕР\n\nБез таймера, але тільки 1 спроба!\nГотовий?"
@@ -828,10 +882,9 @@ async def sniper_mode_callback(callback: CallbackQuery, state: FSMContext):
     builder.adjust(1)
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
 
-
 @router.callback_query(F.data == "training_mode")
 async def training_mode_callback(callback: CallbackQuery, state: FSMContext):
-    """Навчальний режим"""
+    
     await callback.answer()
     await state.update_data(mode="training", level=1, question_type="standard")
     text = "🎓 РЕЖИМ НАВЧАННЯ\n\nБез таймера + підказки!\nПочнемо?"
@@ -841,28 +894,24 @@ async def training_mode_callback(callback: CallbackQuery, state: FSMContext):
     builder.adjust(1)
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
 
-
 @router.callback_query(F.data == "start_lightning")
 async def start_lightning(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await start_quiz_session(callback.message, state)
-
 
 @router.callback_query(F.data == "start_sniper")
 async def start_sniper(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await start_quiz_session(callback.message, state)
 
-
 @router.callback_query(F.data == "start_training")
 async def start_training(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await start_quiz_session(callback.message, state)
 
-
 @router.callback_query(F.data == "mode_random")
 async def mode_random_callback(callback: CallbackQuery, state: FSMContext):
-    """Випадкові приклади"""
+    
     await callback.answer()
     await state.update_data(mode="random", specific_number=None, question_type="standard")
     text = "⭐ ВИБЕРИ РІВЕНЬ СКЛАДНОСТІ"
@@ -870,10 +919,9 @@ async def mode_random_callback(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
     await state.set_state(QuizStates.choosing_level)
 
-
 @router.callback_query(F.data == "mode_specific")
 async def mode_specific_callback(callback: CallbackQuery, state: FSMContext):
-    """Конкретне число"""
+    
     await callback.answer()
     await state.update_data(mode="specific", level=1, question_type="standard")
     text = "🔢 ВИБЕРИ ЧИСЛО (2-9)"
@@ -881,10 +929,9 @@ async def mode_specific_callback(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
     await state.set_state(QuizStates.choosing_number)
 
-
 @router.callback_query(F.data == "mode_weak_spots")
 async def mode_weak_spots_callback(callback: CallbackQuery, state: FSMContext):
-    """Тренування слабких місць"""
+    
     await callback.answer()
     user_id = callback.from_user.id
     weak_spots = get_weak_spots(user_id, 10)
@@ -903,43 +950,38 @@ async def mode_weak_spots_callback(callback: CallbackQuery, state: FSMContext):
     builder.adjust(1)
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
 
-
 @router.callback_query(F.data == "start_weak_training")
 async def start_weak_training(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await start_quiz_session(callback.message, state)
 
-
 @router.callback_query(F.data.startswith("level_"))
 async def level_callback(callback: CallbackQuery, state: FSMContext):
-    """Вибір рівня"""
+    
     await callback.answer()
     level = int(callback.data.split("_")[1])
     await state.update_data(level=level)
     await start_quiz_session(callback.message, state)
 
-
 @router.callback_query(F.data.startswith("number_"))
 async def number_callback(callback: CallbackQuery, state: FSMContext):
-    """Вибір числа"""
+    
     await callback.answer()
     number = int(callback.data.split("_")[1])
     await state.update_data(specific_number=number)
     await start_quiz_session(callback.message, state)
 
-
 @router.callback_query(F.data == "view_table")
 async def view_table_callback(callback: CallbackQuery):
-    """Переглянути таблицю"""
+    
     await callback.answer()
     text = "📋 ВИБЕРИ ЧИСЛО:"
     builder = create_table_selection_menu()
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
 
-
 @router.callback_query(F.data.startswith("table_"))
 async def show_table_callback(callback: CallbackQuery):
-    """Показати таблицю"""
+    
     await callback.answer()
     number = int(callback.data.split("_")[1])
     table_text = get_multiplication_table(number)
@@ -949,10 +991,9 @@ async def show_table_callback(callback: CallbackQuery):
     builder.adjust(1)
     await callback.message.edit_text(table_text, reply_markup=builder.as_markup())
 
-
 @router.callback_query(F.data.startswith("show_table_"))
 async def show_table_after_wrong(callback: CallbackQuery):
-    """Таблиця після помилки"""
+    
     await callback.answer()
     number = int(callback.data.split("_")[2])
     table_text = get_multiplication_table(number) + "\n\n💡 Вивчи і продовжуй!"
@@ -962,10 +1003,9 @@ async def show_table_after_wrong(callback: CallbackQuery):
     builder.adjust(1)
     await callback.message.edit_text(table_text, reply_markup=builder.as_markup())
 
-
 @router.callback_query(F.data.startswith("hint_"))
 async def show_hint(callback: CallbackQuery):
-    """Показати підказку"""
+    
     await callback.answer()
     parts = callback.data.split("_")
     num1, num2 = int(parts[1]), int(parts[2])
@@ -976,10 +1016,9 @@ async def show_hint(callback: CallbackQuery):
     builder.adjust(1)
     await callback.message.edit_text(hint, reply_markup=builder.as_markup())
 
-
 @router.callback_query(F.data == "my_stats")
 async def show_stats(callback: CallbackQuery):
-    """Показати статистику"""
+    
     await callback.answer()
     user_id = callback.from_user.id
     stats = get_user_stats(user_id)
@@ -993,30 +1032,14 @@ async def show_stats(callback: CallbackQuery):
     correct = stats['correct_answers']
     accuracy = (correct / total * 100) if total > 0 else 0
     
-    stats_text = f"""
-📊 СТАТИСТИКА: {display_name}
-
-📅 {stats['start_date'][:10]} → {stats['last_activity'][:10]}
-
-📈 Показники:
-• Питань: {total}
-• Правильних: {correct} ✅
-• Точність: {accuracy:.1f}%
-
-🔥 Рекорди:
-• Найкраща серія: {stats['best_streak']}
-• Поточна серія: {stats['current_streak']}
-
-{AIAssistant.get_motivational_message(accuracy, stats['current_streak'])}
-"""
+    stats_text = f
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 Головне меню", callback_data="back_main")
     await callback.message.edit_text(stats_text, reply_markup=builder.as_markup())
 
-
 @router.callback_query(F.data == "ai_analysis")
 async def ai_analysis(callback: CallbackQuery):
-    """AI-аналіз"""
+    
     await callback.answer()
     user_id = callback.from_user.id
     analysis = AIAssistant.analyze_mistakes(user_id)
@@ -1026,10 +1049,9 @@ async def ai_analysis(callback: CallbackQuery):
     builder.adjust(1)
     await callback.message.edit_text(analysis, reply_markup=builder.as_markup())
 
-
 @router.callback_query(F.data == "activity_calendar")
 async def activity_calendar(callback: CallbackQuery):
-    """Календар активності"""
+    
     await callback.answer()
     user_id = callback.from_user.id
     calendar_data = get_activity_calendar(user_id, 30)
@@ -1056,10 +1078,9 @@ async def activity_calendar(callback: CallbackQuery):
     builder.button(text="🔙 Головне меню", callback_data="back_main")
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
 
-
 @router.callback_query(F.data == "leaderboard")
 async def leaderboard(callback: CallbackQuery):
-    """Рейтинг"""
+    
     await callback.answer()
     
     with get_db() as conn:
@@ -1085,35 +1106,18 @@ async def leaderboard(callback: CallbackQuery):
     builder.button(text="🔙 Головне меню", callback_data="back_main")
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
 
-
 @router.callback_query(F.data == "info")
 async def info(callback: CallbackQuery):
-    """Інформація"""
+    
     await callback.answer()
-    text = """
-ℹ️ ІНФОРМАЦІЯ
-
-📚 Бот для вивчення таблиці множення
-
-🚀 Можливості:
-• 3 рівні складності
-• 3 спеціальні режими
-• AI-помічник
-• Календар активності
-• Щоденні нагадування
-• Аналіз слабких місць
-• Глобальний рейтинг
-
-Успіхів! 🚀
-"""
+    text = 
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 Головне меню", callback_data="back_main")
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
 
-
 @router.callback_query(F.data == "back_main")
 async def back_main(callback: CallbackQuery, state: FSMContext):
-    """Назад до головного меню"""
+    
     await callback.answer()
     await state.clear()
     display_name = get_display_name(callback.from_user.id)
@@ -1121,20 +1125,18 @@ async def back_main(callback: CallbackQuery, state: FSMContext):
     builder = create_main_menu()
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
 
-
 @router.callback_query(F.data == "back_mode")
 async def back_mode(callback: CallbackQuery, state: FSMContext):
-    """Назад до вибору режиму"""
+    
     await callback.answer()
     text = "🎮 ВИБЕРИ РЕЖИМ"
     builder = create_mode_menu()
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
     await state.set_state(QuizStates.choosing_mode)
 
-
 @router.callback_query(F.data == "disable_reminders")
 async def disable_reminders(callback: CallbackQuery):
-    """Вимкнути нагадування"""
+    
     user_id = callback.from_user.id
     with get_db() as conn:
         cursor = conn.cursor()
@@ -1145,12 +1147,13 @@ async def disable_reminders(callback: CallbackQuery):
 
 @router.callback_query(F.data == "snooze_reminder")
 async def snooze_reminder_callback(callback: CallbackQuery):
-    """Відкласти нагадування на годину"""
+    
     await callback.answer("⏰ Добре, нагадаю через годину!")
     
     user_id = callback.from_user.id
     display_name = get_display_name(user_id)
     
+
     async def send_snooze_reminder():
         await asyncio.sleep(3600) 
         
@@ -1165,19 +1168,22 @@ async def snooze_reminder_callback(callback: CallbackQuery):
         except Exception as e:
             logger.error(f"Помилка відкладеного нагадування: {e}")
     
+
     asyncio.create_task(send_snooze_reminder())
     
+
     try:
         await callback.message.delete()
     except:
         pass
 
 async def start_quiz_session(message: Message, state: FSMContext):
-    """Початок квізу"""
+    
     data = await state.get_data()
     level = data.get('level', 1)
     specific_number = data.get('specific_number')
     mode = data.get('mode', 'normal')
+    
 
     if mode == "weak_spots":
         weak_spots_list = data.get('weak_spots_list', [])
@@ -1203,6 +1209,7 @@ async def start_quiz_session(message: Message, state: FSMContext):
         question_start_time=question_start_time
     )
     
+
     if mode == "lightning":
         time_limit = ANSWER_TIME_LIMITS['lightning']
     elif mode in ["sniper", "training"]:
@@ -1225,14 +1232,14 @@ async def start_quiz_session(message: Message, state: FSMContext):
     await message.edit_text(question_text)
     await state.set_state(QuizStates.waiting_answer)
     
+
     if mode not in ["sniper", "training"]:
         timer_id = f"{message.chat.id}_{question_start_time}"
         active_timers[timer_id] = True
         asyncio.create_task(question_timer(message, state, time_limit, timer_id))
 
-
 async def question_timer(message: Message, state: FSMContext, time_limit: int, timer_id: str):
-    """Таймер"""
+    
     await asyncio.sleep(time_limit)
     
     if timer_id not in active_timers:
@@ -1274,10 +1281,9 @@ async def question_timer(message: Message, state: FSMContext, time_limit: int, t
         
         await state.set_state(QuizStates.in_quiz)
 
-
 @router.message(StateFilter(QuizStates.waiting_answer))
 async def process_answer(message: Message, state: FSMContext):
-    """Обробка відповіді"""
+    
     user_id = message.from_user.id
     data = await state.get_data()
     
@@ -1289,6 +1295,7 @@ async def process_answer(message: Message, state: FSMContext):
     elapsed_time = time.time() - question_start_time
     mode = data.get('mode', 'normal')
     
+
     if mode not in ["sniper", "training"]:
         level = data.get('level', 1)
         time_limit = ANSWER_TIME_LIMITS.get('lightning' if mode == 'lightning' else level, 15)
@@ -1309,6 +1316,7 @@ async def process_answer(message: Message, state: FSMContext):
     
     update_activity_calendar(user_id)
     
+
     if user_answer == correct:
         update_user_stats(user_id, is_correct=True)
         save_answer_history(user_id, f"{num1} × {num2}", "standard", user_answer, correct, True, elapsed_time, data.get('level', 1), mode)
@@ -1333,6 +1341,7 @@ async def process_answer(message: Message, state: FSMContext):
         await message.answer(response_text, reply_markup=builder.as_markup())
         
     else:
+
         update_user_stats(user_id, is_correct=False)
         save_answer_history(user_id, f"{num1} × {num2}", "standard", user_answer, correct, False, elapsed_time, data.get('level', 1), mode)
         track_weak_spot(user_id, num1, num2)
@@ -1348,6 +1357,7 @@ async def process_answer(message: Message, state: FSMContext):
         
         explanation = explain_mistake(num1, num2, user_answer, correct)
         
+
         if mode == "training":
             explanation += f"\n\n{AIAssistant.get_hint(num1, num2)}"
         
@@ -1356,17 +1366,15 @@ async def process_answer(message: Message, state: FSMContext):
     
     await state.set_state(QuizStates.in_quiz)
 
-
 @router.callback_query(F.data == "continue_quiz")
 async def continue_quiz(callback: CallbackQuery, state: FSMContext):
-    """Продовження квізу"""
+    
     await callback.answer()
     await start_quiz_session(callback.message, state)
 
-
 @router.callback_query(F.data == "finish_quiz")
 async def finish_quiz(callback: CallbackQuery, state: FSMContext):
-    """Завершення квізу"""
+    
     await callback.answer()
     user_id = callback.from_user.id
     stats = get_user_stats(user_id)
@@ -1386,18 +1394,21 @@ async def finish_quiz(callback: CallbackQuery, state: FSMContext):
     await state.clear()
 
 async def main():
-    """Головна функція"""
-    init_database()
+    
+
+    migrate_database()  
+    load_whitelist_from_db()  
+
     dp.include_router(router)
     logger.info("🚀 Бот запущено!")
-    
+
     try:
         await bot.send_message(
             ADMIN_ID, 
             f"🤖 Бот запущено!\n"
             f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"💾 БД: {DB_NAME}\n"
-            f"🔔 Нагадування: {', '.join(map(str, REMINDER_HOURS))} год\n\n" 
+            f"🔔 Нагадування: {', '.join(map(str, REMINDER_HOURS))} год\n\n"
             f"✅ AI активний\n"
             f"✅ Календар\n"
             f"✅ Аналіз слабких місць\n"
@@ -1407,13 +1418,11 @@ async def main():
         logger.error(f"Помилка: {e}")
 
     asyncio.create_task(send_daily_reminders())
-    
-    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
 
+    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("⛔ Бот зупинено")
-
