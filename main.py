@@ -11,6 +11,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict
 from contextlib import contextmanager
+from collections import Counter
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
