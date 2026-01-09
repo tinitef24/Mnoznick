@@ -1920,11 +1920,11 @@ async def question_timer(message: Message, state: FSMContext, time_limit: int, t
         await state.update_data(consecutive_timeouts=consecutive_timeouts)
 
         if consecutive_timeouts >= 3:
-            stop_text = "💤 **Квіз зупинено через неактивність.**\n\nТи пропустив 3 питання підряд. Коли будеш готовий, повертайся!"
+            stop_text = "💤 *Квіз зупинено через неактивність.*\n\nТи пропустив 3 питання підряд. Коли будеш готовий, повертайся!"
             try:
-                await message.edit_text(stop_text, reply_markup=create_main_menu().as_markup())
+                await message.edit_text(stop_text, reply_markup=create_main_menu().as_markup(), parse_mode="Markdown")
             except:
-                await message.answer(stop_text, reply_markup=create_main_menu().as_markup())
+                await message.answer(stop_text, reply_markup=create_main_menu().as_markup(), parse_mode="Markdown")
             
             await state.clear()
             return
