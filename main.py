@@ -1934,6 +1934,9 @@ async def question_timer(message: Message, state: FSMContext, time_limit: int, t
         except:
             await message.answer(timeout_text)
         
+        # Prevent race condition where user answers during sleep
+        await state.set_state(QuizStates.in_quiz)
+
         await asyncio.sleep(2)
         await start_quiz_session(message, state)
 
@@ -1956,7 +1959,14 @@ async def process_answer(message: Message, state: FSMContext):
     # Перевірка часу
     if mode not in ["sniper", "training"]:
         level = data.get('level', 1)
-        time_limit = ANSWER_TIME_LIMITS.get('lightning' if mode == 'lightning' else level, 15)
+        
+        if mode == 'lightning':
+            time_limit = ANSWER_TIME_LIMITS['lightning']
+        elif mode == 'find_x':
+            time_limit = ANSWER_TIME_LIMITS.get(f'find_x_{level}', 30)
+        else:
+            time_limit = ANSWER_TIME_LIMITS.get(level, 15)
+
         if elapsed_time > time_limit:
             await message.answer("⏰ Час вже вичерпано!")
             return
