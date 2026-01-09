@@ -1915,6 +1915,20 @@ async def question_timer(message: Message, state: FSMContext, time_limit: int, t
         else:
              timeout_text = f"⏰ ЧАС ВИЧЕРПАНО!\n\n❌ {question} = ?\n✅ Відповідь: {correct}\n\n⏳ Наступне питання..."
         
+        # Перевірка на кількість послідовних таймаутів
+        consecutive_timeouts = data.get('consecutive_timeouts', 0) + 1
+        await state.update_data(consecutive_timeouts=consecutive_timeouts)
+
+        if consecutive_timeouts >= 3:
+            stop_text = "💤 **Квіз зупинено через неактивність.**\n\nТи пропустив 3 питання підряд. Коли будеш готовий, повертайся!"
+            try:
+                await message.edit_text(stop_text, reply_markup=create_main_menu().as_markup())
+            except:
+                await message.answer(stop_text, reply_markup=create_main_menu().as_markup())
+            
+            await state.clear()
+            return
+
         try:
             await message.edit_text(timeout_text, reply_markup=None)
         except:
@@ -1928,6 +1942,7 @@ async def question_timer(message: Message, state: FSMContext, time_limit: int, t
 async def process_answer(message: Message, state: FSMContext):
     """Обробка відповіді"""
     user_id = message.from_user.id
+    await state.update_data(consecutive_timeouts=0)  # Скидаємо лічильник таймаутів
     data = await state.get_data()
     
     question_start_time = data.get('question_start_time')
